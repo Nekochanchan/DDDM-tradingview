@@ -9,6 +9,8 @@ import {
   TRADING_IDEAS
 } from './data/marketData';
 import { Header } from './components/Header';
+import { TickerTape } from './components/TickerTape';
+import { MarketHeatmap } from './components/MarketHeatmap';
 import { ChipNav } from './components/ChipNav';
 import { WorldIndices } from './components/WorldIndices';
 import { StockList } from './components/StockList';
@@ -27,6 +29,8 @@ export default function App() {
   const [activeCategory, setActiveCategory] = useState<AssetCategory>('indices');
   const [marketRegionDropdown, setMarketRegionDropdown] = useState<string>('everywhere');
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'standard' | 'heatmap'>('standard');
+  const [screenerFilter, setScreenerFilter] = useState<'all' | 'gainers' | 'losers' | 'volume'>('all');
 
   // Asset Quotes State with Live Sim
   const [worldIndices, setWorldIndices] = useState<AssetQuote[]>(INITIAL_WORLD_INDICES);
@@ -71,15 +75,27 @@ export default function App() {
 
   // Active category assets for main view
   const categoryAssets = useMemo(() => {
-    if (activeCategory === 'stocks') return usStocks;
-    if (activeCategory === 'indices') return worldIndices;
-    return otherAssets.filter(a => a.category === activeCategory);
-  }, [activeCategory, usStocks, worldIndices, otherAssets]);
+    let list: AssetQuote[] = [];
+    if (activeCategory === 'stocks') list = usStocks;
+    else if (activeCategory === 'indices') list = worldIndices;
+    else list = otherAssets.filter(a => a.category === activeCategory);
+
+    if (screenerFilter === 'gainers') return [...list].sort((a, b) => b.changePercent - a.changePercent);
+    if (screenerFilter === 'losers') return [...list].sort((a, b) => a.changePercent - b.changePercent);
+    return list;
+  }, [activeCategory, usStocks, worldIndices, otherAssets, screenerFilter]);
 
   // Watchlist items
   const watchlistItems = useMemo(() => {
     return allCurrentAssets.filter(a => watchlistSymbols.includes(a.symbol));
   }, [allCurrentAssets, watchlistSymbols]);
+
+  // Market Breadth Stats
+  const marketBreadth = useMemo(() => {
+    const gainers = allCurrentAssets.filter(a => a.changePercent > 0).length;
+    const losers = allCurrentAssets.filter(a => a.changePercent < 0).length;
+    return { gainers, losers, total: allCurrentAssets.length };
+  }, [allCurrentAssets]);
 
   // Simulated Live Market Price Fluctuations
   useEffect(() => {
@@ -149,7 +165,7 @@ export default function App() {
           return p;
         })
       );
-    }, 3200);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [allCurrentAssets]);
@@ -214,51 +230,88 @@ export default function App() {
         accountBalance={accountBalance}
       />
 
+      {/* Live Scrolling Ticker Tape */}
+      <TickerTape
+        assets={allCurrentAssets}
+        onSelectAsset={(asset) => setSelectedAsset(asset)}
+        flashingSymbols={flashingSymbols}
+      />
+
       {/* Main Container */}
-      <main className="max-w-4xl mx-auto px-4 py-6">
+      <main className="max-w-4xl mx-auto px-4 py-5">
         {/* TAB 1: MARKETS (Default screen matching screenshot) */}
         {activeTab === 'markets' && (
           <div>
-            {/* Header: Title + Dropdown */}
-            <div className="relative mb-6">
-              <div
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center gap-2 cursor-pointer w-fit select-none group"
-              >
-                <h1 className="text-[32px] leading-10 font-bold font-headline tracking-tight text-[#dfe2f2] group-hover:text-white">
-                  Markets, {marketRegionDropdown}
-                </h1>
-                <span className={`material-symbols-outlined text-[32px] text-[#dfe2f2] transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}>
-                  expand_more
-                </span>
+            {/* Header: Title + Dropdown & View Mode Switcher */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+              <div className="relative">
+                <div
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="flex items-center gap-2 cursor-pointer w-fit select-none group"
+                >
+                  <h1 className="text-[28px] sm:text-[32px] leading-tight font-bold font-headline tracking-tight text-[#dfe2f2] group-hover:text-white">
+                    Markets, {marketRegionDropdown}
+                  </h1>
+                  <span className={`material-symbols-outlined text-[28px] sm:text-[32px] text-[#dfe2f2] transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`}>
+                    expand_more
+                  </span>
+                </div>
+
+                {/* Dropdown Menu */}
+                {isDropdownOpen && (
+                  <div className="absolute top-12 left-0 z-30 bg-[#1E222D] border border-[#2A2E39] rounded-xl py-2 w-64 shadow-2xl animate-in fade-in zoom-in-95">
+                    {[
+                      { id: 'everywhere', label: 'Markets, everywhere' },
+                      { id: 'US', label: 'Markets, United States' },
+                      { id: 'Europe', label: 'Markets, Europe' },
+                      { id: 'Asia', label: 'Markets, Asia-Pacific' },
+                      { id: 'Crypto', label: 'Markets, Crypto' }
+                    ].map((option) => (
+                      <button
+                        key={option.id}
+                        onClick={() => {
+                          setMarketRegionDropdown(option.id);
+                          setIsDropdownOpen(false);
+                        }}
+                        className="w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-[#262a35] text-[#dfe2f2] flex items-center justify-between cursor-pointer"
+                      >
+                        <span>{option.label}</span>
+                        {marketRegionDropdown === option.id && (
+                          <span className="material-symbols-outlined text-[16px] text-[#2962ff]">check</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Dropdown Menu */}
-              {isDropdownOpen && (
-                <div className="absolute top-12 left-0 z-30 bg-[#1E222D] border border-[#2A2E39] rounded-xl py-2 w-64 shadow-2xl animate-in fade-in zoom-in-95">
-                  {[
-                    { id: 'everywhere', label: 'Markets, everywhere' },
-                    { id: 'US', label: 'Markets, United States' },
-                    { id: 'Europe', label: 'Markets, Europe' },
-                    { id: 'Asia', label: 'Markets, Asia-Pacific' },
-                    { id: 'Crypto', label: 'Markets, Crypto' }
-                  ].map((option) => (
-                    <button
-                      key={option.id}
-                      onClick={() => {
-                        setMarketRegionDropdown(option.id);
-                        setIsDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-4 py-2.5 text-xs font-semibold hover:bg-[#262a35] text-[#dfe2f2] flex items-center justify-between cursor-pointer"
-                    >
-                      <span>{option.label}</span>
-                      {marketRegionDropdown === option.id && (
-                        <span className="material-symbols-outlined text-[16px] text-[#2962ff]">check</span>
-                      )}
-                    </button>
-                  ))}
+              {/* View Mode & Market Breadth */}
+              <div className="flex items-center gap-2 text-xs">
+                <div className="hidden sm:flex items-center gap-2 bg-[#1E222D] border border-[#2A2E39] px-2.5 py-1 rounded-lg text-[11px] font-data-tabular">
+                  <span className="text-[#089981] font-bold">{marketBreadth.gainers} ▲</span>
+                  <span className="text-[#8d90a2]">/</span>
+                  <span className="text-[#F23645] font-bold">{marketBreadth.losers} ▼</span>
                 </div>
-              )}
+
+                <div className="flex bg-[#1E222D] p-0.5 rounded-lg border border-[#2A2E39]">
+                  <button
+                    onClick={() => setViewMode('standard')}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                      viewMode === 'standard' ? 'bg-[#2962ff] text-white' : 'text-[#8d90a2] hover:text-[#dfe2f2]'
+                    }`}
+                  >
+                    List
+                  </button>
+                  <button
+                    onClick={() => setViewMode('heatmap')}
+                    className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors ${
+                      viewMode === 'heatmap' ? 'bg-[#2962ff] text-white' : 'text-[#8d90a2] hover:text-[#dfe2f2]'
+                    }`}
+                  >
+                    Heatmap
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Horizontal Chip Filter Navigation */}
@@ -267,34 +320,72 @@ export default function App() {
               onSelectCategory={(cat) => setActiveCategory(cat)}
             />
 
-            {/* If 'indices' is active, show World Indices Grid + US Stocks */}
-            {activeCategory === 'indices' ? (
-              <>
-                {/* World Indices Section */}
-                <WorldIndices
-                  indices={worldIndices}
-                  onSelectIndex={(asset) => setSelectedAsset(asset)}
-                  onViewAllIndices={() => {}}
-                />
+            {/* Screener Filter Tabs */}
+            <div className="flex items-center gap-2 mb-4 overflow-x-auto hide-scrollbar text-xs">
+              <span className="text-[11px] text-[#8d90a2] font-semibold uppercase tracking-wider">Filter:</span>
+              {[
+                { id: 'all', label: 'All Instruments' },
+                { id: 'gainers', label: 'Top Gainers 🚀' },
+                { id: 'losers', label: 'Top Losers 📉' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setScreenerFilter(f.id as any)}
+                  className={`px-2.5 py-1 rounded-full text-xs transition-colors cursor-pointer ${
+                    screenerFilter === f.id
+                      ? 'bg-[#262a35] text-white border border-[#2962ff]'
+                      : 'text-[#8d90a2] hover:text-[#dfe2f2] hover:bg-[#1E222D]'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
 
-                {/* US Stocks Section */}
-                <StockList
-                  title="US stocks"
-                  stocks={usStocks}
-                  onSelectStock={(asset) => setSelectedAsset(asset)}
-                  flashingSymbols={flashingSymbols}
-                />
-              </>
-            ) : (
-              /* If another category is active (Crypto, Futures, Forex, Bonds, Stocks), show category list */
+            {/* HEATMAP VIEW */}
+            {viewMode === 'heatmap' ? (
               <div className="space-y-6">
+                <MarketHeatmap
+                  assets={categoryAssets}
+                  onSelectAsset={(asset) => setSelectedAsset(asset)}
+                />
                 <StockList
-                  title={`${activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1)} instruments`}
+                  title="All Active Instruments"
                   stocks={categoryAssets}
                   onSelectStock={(asset) => setSelectedAsset(asset)}
                   flashingSymbols={flashingSymbols}
                 />
               </div>
+            ) : (
+              /* STANDARD VIEW (Matching Screenshot) */
+              activeCategory === 'indices' ? (
+                <>
+                  {/* World Indices Section */}
+                  <WorldIndices
+                    indices={worldIndices}
+                    onSelectIndex={(asset) => setSelectedAsset(asset)}
+                    onViewAllIndices={() => {}}
+                  />
+
+                  {/* US Stocks Section */}
+                  <StockList
+                    title="US stocks"
+                    stocks={categoryAssets}
+                    onSelectStock={(asset) => setSelectedAsset(asset)}
+                    flashingSymbols={flashingSymbols}
+                  />
+                </>
+              ) : (
+                /* Category Specific List */
+                <div className="space-y-6">
+                  <StockList
+                    title={`${activeCategory.charAt(0).toUpperCase() + activeCategory.slice(1)} instruments`}
+                    stocks={categoryAssets}
+                    onSelectStock={(asset) => setSelectedAsset(asset)}
+                    flashingSymbols={flashingSymbols}
+                  />
+                </div>
+              )
             )}
           </div>
         )}
@@ -336,13 +427,13 @@ export default function App() {
                   TV
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-[#dfe2f2]">TradingView Pro Hub</h3>
-                  <p className="text-xs text-[#8d90a2]">Paper Trading: ${accountBalance.toLocaleString()}</p>
+                  <h3 className="text-base font-bold text-[#dfe2f2]">TradingView Pro Terminal</h3>
+                  <p className="text-xs text-[#8d90a2]">Paper Trading Balance: ${accountBalance.toLocaleString()}</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsMenuOpen(true)}
-                className="w-full bg-[#2962ff] text-white py-3 rounded-xl text-xs font-bold shadow-md cursor-pointer"
+                className="w-full bg-[#2962ff] hover:bg-[#2962ff]/90 text-white py-3 rounded-xl text-xs font-bold shadow-md cursor-pointer transition-colors"
               >
                 Open Full Trading Dashboard & Calendar
               </button>
@@ -402,3 +493,4 @@ export default function App() {
     </div>
   );
 }
+

@@ -8,17 +8,18 @@ interface InteractiveChartProps {
 }
 
 type TimeFrame = '1D' | '5D' | '1M' | '6M' | '1Y' | 'ALL';
-type ChartType = 'area' | 'candle' | 'line';
+type ChartType = 'area' | 'candle' | 'heikin' | 'line';
 
 export const InteractiveChart: React.FC<InteractiveChartProps> = ({
   asset,
-  height = 260,
+  height = 280,
   showControls = true
 }) => {
   const [timeframe, setTimeframe] = useState<TimeFrame>('1D');
   const [chartType, setChartType] = useState<ChartType>('area');
   const [showVolume, setShowVolume] = useState<boolean>(true);
   const [showSMA, setShowSMA] = useState<boolean>(true);
+  const [showRSI, setShowRSI] = useState<boolean>(false);
   const [hoveredPoint, setHoveredPoint] = useState<PricePoint | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -39,7 +40,27 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
     }
   };
 
-  const data = getData();
+  const rawData = getData();
+
+  // Calculate Heikin Ashi if enabled
+  const data = chartType === 'heikin' ? rawData.map((d, i, arr) => {
+    const prev = i > 0 ? arr[i - 1] : d;
+    const prevOpen = prev.open || prev.price;
+    const prevClose = prev.close || prev.price;
+    const haClose = ((d.open || d.price) + (d.high || d.price) + (d.low || d.price) + (d.close || d.price)) / 4;
+    const haOpen = (prevOpen + prevClose) / 2;
+    const haHigh = Math.max(d.high || d.price, haOpen, haClose);
+    const haLow = Math.min(d.low || d.price, haOpen, haClose);
+    return {
+      ...d,
+      open: haOpen,
+      close: haClose,
+      high: haHigh,
+      low: haLow,
+      price: haClose
+    };
+  }) : rawData;
+
   const prices = data.map(d => d.price);
   const minPrice = Math.min(...prices) * 0.998;
   const maxPrice = Math.max(...prices) * 1.002;
@@ -49,7 +70,8 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
   const strokeColor = isPositive ? '#089981' : '#F23645';
 
   const width = 600;
-  const paddingBottom = showVolume ? 40 : 20;
+  const rsiHeight = showRSI ? 60 : 0;
+  const paddingBottom = (showVolume ? 36 : 20) + rsiHeight;
   const paddingTop = 15;
   const paddingLeft = 10;
   const paddingRight = 65; // room for y-axis price labels
@@ -77,6 +99,18 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
 
   const smaPathD = smaPoints.length > 0 ? `M ${smaPoints.join(' L ')}` : '';
 
+  // Calculate RSI (14) points if enabled
+  const rsiPoints = data.map((_, i) => {
+    if (i < 5) return null;
+    const pct = ((data[i].price - data[i - 5].price) / data[i - 5].price) * 100;
+    const rsiVal = Math.min(90, Math.max(10, 50 + pct * 15));
+    const x = paddingLeft + (i / (data.length - 1)) * chartW;
+    const y = height - rsiHeight + 10 + (1 - (rsiVal / 100)) * (rsiHeight - 20);
+    return { x, y, rsiVal };
+  }).filter(Boolean) as { x: number; y: number; rsiVal: number }[];
+
+  const rsiPathD = rsiPoints.length > 0 ? `M ${rsiPoints.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')}` : '';
+
   // Max volume for volume bars
   const maxVol = Math.max(...data.map(d => d.volume || 10000));
 
@@ -87,7 +121,6 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
     const mouseX = e.clientX - rect.left;
     const relativeX = (mouseX / rect.width) * width;
     
-    // Find closest data point
     let closest = points[0];
     let minDist = Infinity;
     for (const p of points) {
@@ -136,12 +169,12 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
             </div>
             {hoveredPoint && (
               <span className="text-xs text-[#B2B5BE] font-data-tabular">
-                {hoveredPoint.time}
+                {hoveredPoint.time} • O:{hoveredPoint.open || hoveredPoint.price} H:{hoveredPoint.high || hoveredPoint.price} L:{hoveredPoint.low || hoveredPoint.price}
               </span>
             )}
           </div>
 
-          {/* Controls: Timeframes & Type */}
+          {/* Controls: Timeframes */}
           <div className="flex items-center gap-1 bg-[#1E222D] p-0.5 rounded-lg border border-[#2A2E39]">
             {(['1D', '5D', '1M', '6M', '1Y', 'ALL'] as TimeFrame[]).map((tf) => (
               <button
@@ -168,15 +201,13 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
       >
         {/* Toggle tools toolbar */}
         {showControls && (
-          <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 bg-[#1E222D]/90 backdrop-blur-sm px-2 py-1 rounded border border-[#2A2E39] text-[11px]">
+          <div className="absolute top-2 left-2 z-10 flex items-center gap-1 bg-[#1E222D]/90 backdrop-blur-sm px-2 py-1 rounded border border-[#2A2E39] text-[11px]">
             <button
-              onClick={() => setChartType(chartType === 'area' ? 'candle' : 'area')}
-              className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors ${
-                chartType === 'candle' ? 'bg-[#2962ff] text-white' : 'text-[#B2B5BE] hover:text-white'
-              }`}
-              title="Toggle Candlestick / Area"
+              onClick={() => setChartType(chartType === 'area' ? 'candle' : chartType === 'candle' ? 'heikin' : 'area')}
+              className="px-1.5 py-0.5 rounded text-[11px] font-medium text-[#b6c4ff] hover:bg-[#262a35] transition-colors"
+              title="Toggle Chart Type"
             >
-              {chartType === 'candle' ? '🕯️ Candles' : '📈 Line'}
+              {chartType === 'candle' ? '🕯️ Candles' : chartType === 'heikin' ? '📊 Heikin-Ashi' : '📈 Line'}
             </button>
             <span className="text-[#2A2E39]">|</span>
             <button
@@ -186,7 +217,7 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
               }`}
               title="Toggle SMA 5 Indicator"
             >
-              SMA(5)
+              SMA
             </button>
             <span className="text-[#2A2E39]">|</span>
             <button
@@ -194,9 +225,19 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
               className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
                 showVolume ? 'text-[#089981] font-semibold' : 'text-[#B2B5BE]'
               }`}
-              title="Toggle Volume Bars"
+              title="Toggle Volume"
             >
               VOL
+            </button>
+            <span className="text-[#2A2E39]">|</span>
+            <button
+              onClick={() => setShowRSI(!showRSI)}
+              className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
+                showRSI ? 'text-[#2962ff] font-semibold' : 'text-[#B2B5BE]'
+              }`}
+              title="Toggle RSI Oscillator"
+            >
+              RSI(14)
             </button>
           </div>
         )}
@@ -253,8 +294,8 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
             const barW = Math.max(2, (chartW / data.length) * 0.65);
             const x = paddingLeft + (i / (data.length - 1)) * chartW - barW / 2;
             const volRatio = (d.volume || 10000) / maxVol;
-            const barH = volRatio * 28;
-            const y = height - paddingBottom + (30 - barH);
+            const barH = volRatio * 24;
+            const y = height - paddingBottom + (26 - barH);
             const isBarGreen = (d.close || d.price) >= (d.open || d.price);
             return (
               <rect
@@ -271,9 +312,9 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
           })}
 
           {/* Area & Line Chart */}
-          {chartType === 'area' && (
+          {(chartType === 'area' || chartType === 'line') && (
             <>
-              <path d={areaD} fill={`url(#chart-grad-${asset.id})`} />
+              {chartType === 'area' && <path d={areaD} fill={`url(#chart-grad-${asset.id})`} />}
               <path
                 d={pathD}
                 fill="none"
@@ -285,8 +326,8 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
             </>
           )}
 
-          {/* Candlestick Chart */}
-          {chartType === 'candle' && data.map((d, i) => {
+          {/* Candlestick & Heikin-Ashi Chart */}
+          {(chartType === 'candle' || chartType === 'heikin') && data.map((d, i) => {
             const x = paddingLeft + (i / (data.length - 1)) * chartW;
             const open = d.open || d.price * 0.999;
             const close = d.close || d.price;
@@ -306,9 +347,7 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
 
             return (
               <g key={i}>
-                {/* Wick */}
                 <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={candleColor} strokeWidth="1" />
-                {/* Body */}
                 <rect
                   x={x - candleW / 2}
                   y={bodyTop}
@@ -323,7 +362,7 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
             );
           })}
 
-          {/* Simple Moving Average (SMA 5) line */}
+          {/* Simple Moving Average line */}
           {showSMA && smaPathD && (
             <path
               d={smaPathD}
@@ -332,6 +371,50 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
               strokeWidth="1.25"
               strokeDasharray="4,3"
             />
+          )}
+
+          {/* RSI Oscillator Subchart */}
+          {showRSI && (
+            <g>
+              <line
+                x1={paddingLeft}
+                y1={height - rsiHeight + 10}
+                x2={paddingLeft + chartW}
+                y2={height - rsiHeight + 10}
+                stroke="#2A2E39"
+                strokeWidth="1"
+              />
+              <line
+                x1={paddingLeft}
+                y1={height - rsiHeight + 10 + (1 - 0.7) * (rsiHeight - 20)}
+                x2={paddingLeft + chartW}
+                y2={height - rsiHeight + 10 + (1 - 0.7) * (rsiHeight - 20)}
+                stroke="#F23645"
+                strokeWidth="0.5"
+                strokeDasharray="2,2"
+              />
+              <line
+                x1={paddingLeft}
+                y1={height - rsiHeight + 10 + (1 - 0.3) * (rsiHeight - 20)}
+                x2={paddingLeft + chartW}
+                y2={height - rsiHeight + 10 + (1 - 0.3) * (rsiHeight - 20)}
+                stroke="#089981"
+                strokeWidth="0.5"
+                strokeDasharray="2,2"
+              />
+              {rsiPathD && (
+                <path d={rsiPathD} fill="none" stroke="#2962ff" strokeWidth="1.5" />
+              )}
+              <text
+                x={paddingLeft + 4}
+                y={height - rsiHeight + 22}
+                fill="#2962ff"
+                fontSize="8"
+                fontWeight="bold"
+              >
+                RSI (14)
+              </text>
+            </g>
           )}
 
           {/* Latest Live Price Line */}
@@ -366,7 +449,6 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
           {/* Crosshair & Tooltip */}
           {hoverPos && hoveredPoint && (
             <g>
-              {/* Vertical line */}
               <line
                 x1={hoverPos.x}
                 y1={paddingTop}
@@ -377,7 +459,6 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
                 strokeDasharray="3,3"
                 opacity="0.6"
               />
-              {/* Horizontal line */}
               <line
                 x1={paddingLeft}
                 y1={hoverPos.y}
@@ -388,7 +469,6 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
                 strokeDasharray="3,3"
                 opacity="0.6"
               />
-              {/* Point dot */}
               <circle
                 cx={hoverPos.x}
                 cy={hoverPos.y}
@@ -397,7 +477,6 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
                 stroke="#ffffff"
                 strokeWidth="1.5"
               />
-              {/* Y Axis badge on right */}
               <rect
                 x={paddingLeft + chartW}
                 y={hoverPos.y - 8}
@@ -431,3 +510,4 @@ export const InteractiveChart: React.FC<InteractiveChartProps> = ({
     </div>
   );
 };
+
