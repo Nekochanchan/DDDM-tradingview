@@ -1,0 +1,6 @@
+{
+  "name": "TradingView - Markets",
+  "description": "Real-time market analytics, world indices, stock watchlists, interactive charting, financial news, and trading ideas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
